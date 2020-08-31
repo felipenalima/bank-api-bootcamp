@@ -5,12 +5,12 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const { USER_DB, USER_PWD, PORT } = process.env;
+const { USER_DB, USER_PWD, PORT, MONGODB_URI } = process.env;
 
 (async () => {
   try {
     await mongoose.connect(
-      `mongodb+srv://${USER_DB}:${USER_PWD}@cluster0.zee7n.mongodb.net/accounts?retryWrites=true&w=majority`,
+      `mongodb+srv://${USER_DB}:${USER_PWD}@${MONGODB_URI}`,
       {
         useNewUrlParser: true,
         useUnifiedTopology: true,

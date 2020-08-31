@@ -16,7 +16,7 @@ app.post('/accounts', async (req, res) => {
   }
 });
 
-//Retrieve
+//Get Accounts
 app.get('/accounts', async (req, res) => {
   try {
     const account = await accountsModel.find({});
@@ -29,23 +29,26 @@ app.get('/accounts', async (req, res) => {
 //Update Accounts - Deposit
 app.patch('/accounts/deposit', async (req, res) => {
   try {
-    const { agencia, conta, valor } = req.body;
+    const { agency, account, value } = req.body;
 
-    const accountExists = await accountsModel.findOne({ agencia, conta });
+    const accountExists = await accountsModel.findOne({
+      agencia: agency,
+      conta: account,
+    });
 
     if (!accountExists) {
-      throw new Error('Account not found.');
+      res.status(404).send('Account not found');
     }
 
-    if (valor < 0) throw new Error('Negative values are not permitted.');
+    if (value < 0) res.status(500).send('Negative values are not permitted.');
 
     const updatedAccount = await accountsModel.findByIdAndUpdate(
       accountExists.id,
-      { balance: accountExists.balance + valor },
+      { balance: accountExists.balance + value },
       { new: true }
     );
-
-    return res.json(updatedAccount);
+    await updatedAccount.save();
+    res.send({ balance: updatedAccount.balance });
   } catch (error) {
     res.status(500).send(error);
   }
@@ -54,63 +57,81 @@ app.patch('/accounts/deposit', async (req, res) => {
 //Update Accounts - withdraw
 app.patch('/accounts/withdraw', async (req, res) => {
   try {
-    const { agencia, conta, valor } = req.body;
+    const { agency, account, value } = req.body;
 
-    const accountExists = await accountsModel.findOne({ agencia, conta });
+    const accountExists = await accountsModel.findOne({
+      agencia: agency,
+      conta: account,
+    });
 
     if (!accountExists) {
-      res.send('Error');
+      res.status(404).send('Account not found');
     }
 
-    if (valor < 0) throw new Error('Negative values are not permitted.');
-    if (accountExists.balance < 0) throw new Error('Withdraw not permitted.');
+    if (value < 0) res.status(404).send('Negative values are not permitted.');
 
-    const updatedAccount = await accountsModel.findByIdAndUpdate(
-      accountExists.id,
-      { balance: accountExists.balance - valor - 1 },
-      { new: true }
-    );
+    if (value > accountExists.balance || accountExists.balance < 0) {
+      res
+        .status(404)
+        .send('Withdraw not permitted, negative balance are not permitted.');
+    } else {
+      const updatedAccount = await accountsModel.findByIdAndUpdate(
+        accountExists.id,
+        { balance: accountExists.balance - (value + 1) },
+        { new: true }
+      );
 
-    return res.json(updatedAccount);
+      await updatedAccount.save();
+
+      res.send({ balance: updatedAccount.balance });
+    }
   } catch (error) {
     res.status(500).send(error);
   }
 });
 
-//Consultar Saldo
+//Balance Inquiry
 app.get('/accounts/balance', async (req, res) => {
   try {
-    const { agencia, conta } = req.body;
-    const accountExists = await accountsModel.findOne({ agencia, conta });
+    const { agency, account } = req.body;
+
+    const accountExists = await accountsModel.findOne({
+      agencia: agency,
+      conta: account,
+    });
 
     if (!accountExists) {
-      res.status(500).send('Error');
+      res.status(404).send('Account not found.');
     }
-
-    return res.json({ balance: accountExists.balance });
-  } catch (error) {}
+    res.send({ balance: accountExists.balance });
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 //Delete Account
 app.delete('/accounts/delete', async (req, res) => {
   try {
-    const { agencia, conta } = req.body;
+    const { agency, account } = req.body;
+
     const accountDelete = await accountsModel.findOne({
-      agencia,
-      conta,
+      agencia: agency,
+      conta: account,
     });
 
     const agencyCount = await accountsModel.findByIdAndDelete(
       accountDelete.id,
-      { agencia, conta }
+      { agencia: agency, conta: account }
     );
 
-    const allAcountsAgency = await accountsModel.countDocuments({ agencia });
+    const allAcountsAgency = await accountsModel.countDocuments({
+      agencia: agency,
+    });
 
     if (!agencyCount) {
-      res.status(404).send('Account not found');
+      res.status(404).send('Agency not found');
     } else {
-      return res.json(allAcountsAgency);
+      res.send({ allAcountsAgency });
     }
   } catch (error) {
     res.status(500).send(error);
@@ -125,6 +146,7 @@ app.patch('/accounts/transfer', async (req, res) => {
     const firstAccount = await accountsModel.findOne({ conta: originAccount });
     const secondAccount = await accountsModel.findOne({ conta: targetAccount });
 
+    //Check Equal Agencies
     if (firstAccount.agencia === secondAccount.agencia) {
       const balanceOriginAccount = await accountsModel.findByIdAndUpdate(
         firstAccount.id,
@@ -133,6 +155,8 @@ app.patch('/accounts/transfer', async (req, res) => {
         },
         { new: true }
       );
+
+      //Search Agency by Id and Update Balance
       await accountsModel.findByIdAndUpdate(
         secondAccount.id,
         {
@@ -140,7 +164,8 @@ app.patch('/accounts/transfer', async (req, res) => {
         },
         { new: true }
       );
-      return res.json({ balance: balanceOriginAccount.balance });
+
+      res.send({ balance: balanceOriginAccount.balance });
     } else {
       const balanceOriginAccount = await accountsModel.findByIdAndUpdate(
         firstAccount.id,
@@ -157,31 +182,37 @@ app.patch('/accounts/transfer', async (req, res) => {
         },
         { new: true }
       );
-      return res.json({ balance: balanceOriginAccount.balance });
+      res.send({ balance: balanceOriginAccount.balance });
     }
-  } catch (error) {}
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 //Average Balance Agencies
 app.get('/accounts/average', async (req, res) => {
   try {
-    const { agencia } = req.body;
+    const { agency } = req.body;
 
-    const agencies = await accountsModel.find({ agencia });
+    const agencies = await accountsModel.find({ agencia: agency });
 
     if (!agencies) {
-      res.status(500).send('Error');
+      res.status(500).send('Agency not found');
+    } else {
+      const totalBalance = agencies.reduce((accumulator, { balance }) => {
+        accumulator += balance;
+        return accumulator;
+      }, 0);
+
+      const averageBalance = Number(
+        (totalBalance / agencies.length).toFixed(2)
+      );
+
+      res.send({ averageBalance });
     }
-
-    const totalBalance = agencies.reduce((accumulator, { balance }) => {
-      accumulator += balance;
-      return accumulator;
-    }, 0);
-
-    const averageBalance = totalBalance / agencies.length;
-
-    return res.json(Number(averageBalance.toFixed(2)));
-  } catch (error) {}
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 //Lowest Balance
@@ -194,8 +225,10 @@ app.get('/accounts/lowestBalance', async (req, res) => {
       .sort({ balance: 1, name: 1 })
       .limit(countAccounts);
 
-    return res.json(showAccounts);
-  } catch (error) {}
+    res.send(showAccounts);
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 //Highest Balance
@@ -208,8 +241,10 @@ app.get('/accounts/highestBalance', async (req, res) => {
       .sort({ balance: -1, name: 1 })
       .limit(countAccounts);
 
-    return res.json(showAccounts);
-  } catch (error) {}
+    res.send(showAccounts);
+  } catch (error) {
+    res.status(500).send(error);
+  }
 });
 
 //Private Agency (99)
@@ -240,7 +275,7 @@ app.get('/accounts/privateAgency', async (req, res) => {
     accountsToReturn.push(updatedAccount);
   }
 
-  return res.json(accountsToReturn);
+  res.send(accountsToReturn);
 });
 
 export { app as accountsRouter };
